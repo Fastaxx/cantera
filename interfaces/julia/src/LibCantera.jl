@@ -16,15 +16,36 @@ hand-edited.  This module is responsible only for:
   * locating the Cantera shared library (`libcantera`);
   * locating Cantera's data directory (for `gri30.yaml` and friends);
   * `include`-ing the generated binding files.
+
+In a source checkout, the bindings are generated in `src/generated` by
+`scons build`, and the library is the one built from source.  The registered
+package, assembled in `build/julia`, has no `src/generated`: the bindings, the
+library and the data files all come from `Cantera_jll` instead.
 """
 module LibCantera
 
 export libcantera
 
+"Whether the bindings, library and data come from `Cantera_jll` (registered package)."
+const FROM_JLL = !isfile(joinpath(@__DIR__, "generated", "_manifest.jl"))
+
+@static if FROM_JLL
+    import Cantera_jll
+end
+
+"Directory holding the generated binding files."
+const BINDINGS_DIR = @static if FROM_JLL
+    joinpath(Cantera_jll.artifact_dir, "share", "cantera", "julia", "generated")
+else
+    joinpath(@__DIR__, "generated")
+end
+
 """
     find_library() -> String
 
-Locate the Cantera shared library.  Search order:
+Locate the Cantera shared library.  `\$CANTERA_LIBRARY_PATH` takes precedence;
+otherwise the registered package uses the library from `Cantera_jll`, and a source
+checkout searches:
 
  1. `\$CANTERA_LIBRARY_PATH` (a directory or a full path to the library);
  2. `\$CONDA_PREFIX/lib` for a conda-installed Cantera;
@@ -34,6 +55,9 @@ Locate the Cantera shared library.  Search order:
 Throws an informative error if nothing is found.
 """
 function find_library()
+    @static if FROM_JLL
+        haskey(ENV, "CANTERA_LIBRARY_PATH") || return Cantera_jll.libcantera_path
+    end
     # Installed names first, then the in-tree build-tree name (libcantera_shared).
     names = ["libcantera.so", "libcantera.dylib", "libcantera.dll",
              "libcantera.so.3", "libcantera_shared.so", "libcantera_shared.dylib",
@@ -87,9 +111,9 @@ function __init__()
 end
 
 # ---- generated low-level bindings -------------------------------------------
-include("generated/_manifest.jl")
+include(joinpath(BINDINGS_DIR, "_manifest.jl"))
 for f in GENERATED_FILES
-    include(joinpath("generated", f))
+    include(joinpath(BINDINGS_DIR, f))
 end
 
 """
@@ -102,6 +126,9 @@ directory are already registered automatically by Cantera's
 `Application::setDefaultDirectories` and don't need to be added here.
 """
 function default_data_directory()
+    @static if FROM_JLL
+        return joinpath(Cantera_jll.artifact_dir, "share", "cantera", "data")
+    end
     d = normpath(joinpath(@__DIR__, "..", "..", "..", "data"))
     isdir(d) && isfile(joinpath(d, "gri30.yaml")) && return d
     return nothing
