@@ -130,7 +130,7 @@ jobs:
       - name: Install Cantera build dependencies
         run: |
           brew install --display-times boost doxygen
-          python -m pip install scons ruamel.yaml Jinja2
+          python -m pip install scons packaging ruamel.yaml Jinja2
 
       - name: Build libcantera (shared)
         run: scons build -j3 env_vars=all system_fmt=n debug=n python_package=n
