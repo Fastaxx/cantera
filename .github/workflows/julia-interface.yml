@@ -2,7 +2,9 @@
 #
 # Builds libcantera *from this checkout* (so the generated CLib matches the
 # bindings, including functions this branch adds/renames), then runs the Julia
-# test suite against the freshly built library on Linux and on Windows (MSVC).
+# test suite against the freshly built library on Linux, macOS and Windows (MSVC).
+# The Linux job also runs the Aqua.jl quality checks, and tests the upcoming Julia
+# release (`pre`) without failing the workflow, to catch breakage early.
 name: Julia interface
 
 on:
@@ -27,13 +29,15 @@ jobs:
   test:
     name: Julia ${{ matrix.julia-version }} on ubuntu-latest
     runs-on: ubuntu-latest
+    # Prereleases may break things that are not ours to fix: report, don't fail.
+    continue-on-error: ${{ matrix.julia-version == 'pre' }}
     defaults:
       run:
         shell: bash -el {0}
     strategy:
       fail-fast: false
       matrix:
-        julia-version: ['lts', '1']
+        julia-version: ['lts', '1', 'pre']
     steps:
       - uses: actions/checkout@v7
         with:
@@ -88,6 +92,63 @@ jobs:
           julia --project=interfaces/julia -e 'using Pkg; Pkg.instantiate()'
           julia --project=interfaces/julia interfaces/julia/test/runtests.jl
 
+      - name: Run Aqua.jl quality checks
+        if: matrix.julia-version == '1'
+        env:
+          CANTERA_LIBRARY_PATH: ${{ github.workspace }}/build/lib
+          CANTERA_DATA: ${{ github.workspace }}/data
+        # In a separate environment, so that Aqua is not a dependency of Cantera.jl
+        run: |
+          julia --project=@aqua -e '
+            using Pkg
+            Pkg.develop(path="interfaces/julia")
+            Pkg.add("Aqua")
+            using Aqua, Cantera
+            Aqua.test_all(Cantera)'
+
+  test-macos:
+    name: Julia ${{ matrix.julia-version }} on macos-latest
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version: ['1']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # Same approach as the macOS jobs of main.yml: Homebrew for Boost and
+      # Doxygen, the other C++ dependencies from Cantera's submodules.
+      - name: Install Cantera build dependencies
+        run: |
+          brew install --display-times boost doxygen
+          python -m pip install scons ruamel.yaml Jinja2
+
+      - name: Build libcantera (shared)
+        run: scons build -j3 env_vars=all system_fmt=n debug=n python_package=n
+          f90_interface=n googletest=none boost_inc_dir=$(brew --prefix)/include
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@da908477b5db94c10ffce8cfea9f2b3b9d5db687 # v3.0.3
+        with:
+          version: ${{ matrix.julia-version }}
+
+      - name: Run tests
+        env:
+          CANTERA_LIBRARY_PATH: ${{ github.workspace }}/build/lib
+          CANTERA_DATA: ${{ github.workspace }}/data
+        run: |
+          julia --project=interfaces/julia -e 'using Pkg; Pkg.instantiate()'
+          julia --project=interfaces/julia interfaces/julia/test/runtests.jl
+
   test-windows:
     name: Julia ${{ matrix.julia-version }} on windows-2022 (MSVC)
     runs-on: windows-2022
@@ -128,7 +189,7 @@ jobs:
             blas_lapack_libs=openblas
 
       - name: Set up Julia
-        uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
+        uses: julia-actions/setup-julia@da908477b5db94c10ffce8cfea9f2b3b9d5db687 # v3.0.3
         with:
           version: ${{ matrix.julia-version }}
 
