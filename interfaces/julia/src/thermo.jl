@@ -436,6 +436,45 @@ for (jl, c, a, b, doc) in (
     end
 end
 
+# Two-property setters that Cantera implements only for pure fluids
+# (`PureFluidPhase`, e.g. `Solution("liquidvapor.yaml", "water")`); other phases
+# raise a `CanteraError`.  Names follow the Python interface, where `Q` is the
+# vapor fraction of a saturated state.
+for (jl, c, a, b, what) in (
+        (:set_TV!, :thermo_setState_TV, :T, :v,
+            "temperature `T` [K] and specific volume `v` [m^3/kg]"),
+        (:set_PV!, :thermo_setState_PV, :p, :v,
+            "pressure `p` [Pa] and specific volume `v` [m^3/kg]"),
+        (:set_UP!, :thermo_setState_UP, :u, :p,
+            "specific internal energy `u` [J/kg] and pressure `p` [Pa]"),
+        (:set_VH!, :thermo_setState_VH, :v, :h,
+            "specific volume `v` [m^3/kg] and specific enthalpy `h` [J/kg]"),
+        (:set_TH!, :thermo_setState_TH, :T, :h,
+            "temperature `T` [K] and specific enthalpy `h` [J/kg]"),
+        (:set_SH!, :thermo_setState_SH, :s, :h,
+            "specific entropy `s` [J/kg/K] and specific enthalpy `h` [J/kg]"),
+        (:set_ST!, :thermo_setState_ST, :s, :T,
+            "specific entropy `s` [J/kg/K] and temperature `T` [K]"),
+        (:set_TQ!, :thermo_setState_Tsat, :T, :Q,
+            "a saturated state at temperature `T` [K] with vapor fraction `Q`"),
+        (:set_PQ!, :thermo_setState_Psat, :p, :Q,
+            "a saturated state at pressure `p` [Pa] with vapor fraction `Q`"),
+    )
+    doc = """
+        $jl(fluid, $a, $b) -> fluid
+
+    Set $what.  Only implemented for pure fluids, such as
+    `Solution("liquidvapor.yaml", "water")`; other phases raise a `CanteraError`.
+    """
+    @eval begin
+        function $jl(g::ThermoLike, $a, $b)
+            check(LibCantera.$c(_thermo_handle(g), Float64($a), Float64($b)))
+            return g
+        end
+        @doc $doc $jl
+    end
+end
+
 """
     equilibrate!(gas, XY; solver="auto", rtol=1e-9, max_steps=1000,
                  max_iter=100, estimate_equil=0)
@@ -493,4 +532,6 @@ export temperature, pressure, density, molar_density,
        standard_int_energies_RT!, standard_cp_R!
 
 export set_TP!, set_TPX!, set_TPY!, set_HP!, set_UV!, set_SP!, set_SV!,
-       set_TD!, set_DP!, equilibrate!, set_equivalence_ratio!
+       set_TD!, set_DP!, equilibrate!, set_equivalence_ratio!,
+       set_TV!, set_PV!, set_UP!, set_VH!, set_TH!, set_SH!, set_ST!,
+       set_TQ!, set_PQ!

@@ -129,3 +129,38 @@ end
         close!(gas)
     end
 end
+
+@testset "pure-fluid state setters" begin
+    w = Solution("liquidvapor.yaml", "water")
+    set_TP!(w, 400.0, 2e5)                    # superheated vapor
+    T, P = temperature(w), pressure(w)
+    v, h, s, u = volume_mass(w), enthalpy_mass(w), entropy_mass(w),
+                 internal_energy_mass(w)
+
+    # Each setter recovers the reference state from a nearby starting point.
+    for (set!, a, b) in ((set_TV!, T, v), (set_PV!, P, v), (set_UP!, u, P),
+                         (set_VH!, v, h), (set_TH!, T, h), (set_SH!, s, h),
+                         (set_ST!, s, T))
+        set_TP!(w, 410.0, 1.9e5)
+        @test set!(w, a, b) === w
+        @test temperature(w) ≈ T rtol=1e-6
+        @test pressure(w) ≈ P rtol=1e-6
+    end
+
+    # Saturated states: vapor fraction Q at a given temperature or pressure.
+    set_TQ!(w, 373.15, 0.4)
+    @test temperature(w) ≈ 373.15
+    @test vapor_fraction(w) ≈ 0.4
+    @test pressure(w) ≈ sat_pressure(w, 373.15) rtol=1e-10
+    set_PQ!(w, one_atm, 0.7)
+    @test pressure(w) ≈ one_atm rtol=1e-8
+    @test vapor_fraction(w) ≈ 0.7
+    @test temperature(w) ≈ sat_temperature(w, one_atm) rtol=1e-10
+    close!(w)
+
+    # Not implemented for other phases.
+    gas = Solution("gri30.yaml")
+    @test_throws CanteraError set_TV!(gas, 300.0, 1.0)
+    @test_throws CanteraError set_TQ!(gas, 300.0, 0.5)
+    close!(gas)
+end
