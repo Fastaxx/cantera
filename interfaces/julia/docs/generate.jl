@@ -23,7 +23,7 @@ const OUTDIR = length(ARGS) >= 1 ? ARGS[1] : "build/doc/sphinx/julia"
 # interface source files whose objects it documents; this mirrors the per-topic
 # organisation of the Python and MATLAB reference pages.
 const PAGES = [
-    ("phases", "Phases and Solutions", ["solution.jl", "handles.jl"]),
+    ("phases", "Phases and Solutions", ["solution.jl", "handles.jl", "interface.jl"]),
     ("thermo", "Thermodynamic Properties", ["thermo.jl"]),
     ("kinetics", "Chemical Kinetics", ["kinetics.jl", "reaction.jl"]),
     ("transport", "Transport Properties", ["transport.jl"]),
