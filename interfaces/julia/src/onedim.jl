@@ -727,9 +727,196 @@ function Base.show(io::IO, flame::BurnerFlame)
     end
 end
 
+# ---- domain tolerances and bounds -------------------------------------------
+
+"1-based index of component `name` (e.g. `\"T\"`, `\"velocity\"` or a species) in a domain."
+component_index(d::Domain1D, name::AbstractString) =
+    Int(check(LibCantera.domain_componentIndex(d.handle, name))) + 1
+
+# 0-based CLib component index, or -1 (all components) when `component` is nothing.
+_component0(d::Domain1D, ::Nothing) = Int32(-1)
+_component0(d::Domain1D, name::AbstractString) = Int32(component_index(d, name) - 1)
+
+"""
+    set_steady_tolerances!(domain; rtol, atol, component=nothing) -> domain
+    set_transient_tolerances!(domain; rtol, atol, component=nothing) -> domain
+
+Set the relative and absolute error tolerances used by the steady-state Newton
+solver or by the transient time stepping, for one `component` (by name) or, by
+default, for all components of the domain.
+"""
+function set_steady_tolerances!(d::Domain1D; rtol, atol, component=nothing)
+    check(LibCantera.domain_setSteadyTolerances(d.handle, Float64(rtol), Float64(atol),
+                                                _component0(d, component)))
+    return d
+end
+"Transient-stepping counterpart of [`set_steady_tolerances!`](@ref)."
+function set_transient_tolerances!(d::Domain1D; rtol, atol, component=nothing)
+    check(LibCantera.domain_setTransientTolerances(d.handle, Float64(rtol),
+                                                   Float64(atol),
+                                                   _component0(d, component)))
+    return d
+end
+
+"Relative error tolerance currently used for `component` of a domain."
+rtol(d::Domain1D, component::AbstractString) =
+    checkd(LibCantera.domain_rtol(d.handle, _component0(d, component)))
+
+"Absolute error tolerance currently used for `component` of a domain."
+atol(d::Domain1D, component::AbstractString) =
+    checkd(LibCantera.domain_atol(d.handle, _component0(d, component)))
+
+"""
+    set_bounds!(domain, component; lower, upper) -> domain
+
+Set the lower and upper bounds the solver enforces on `component`.
+"""
+function set_bounds!(d::Domain1D, component::AbstractString; lower, upper)
+    check(LibCantera.domain_setBounds(d.handle, _component0(d, component),
+                                      Float64(lower), Float64(upper)))
+    return d
+end
+
+"Lower bound the solver enforces on `component` of a domain."
+lower_bound(d::Domain1D, component::AbstractString) =
+    checkd(LibCantera.domain_lowerBound(d.handle, _component0(d, component)))
+
+"Upper bound the solver enforces on `component` of a domain."
+upper_bound(d::Domain1D, component::AbstractString) =
+    checkd(LibCantera.domain_upperBound(d.handle, _component0(d, component)))
+
+# ---- flame options and persistence ------------------------------------------
+
+const Flame1D = Union{FreeFlame,BurnerFlame}
+
+"""
+    refine_criteria(flame) -> NamedTuple
+
+Grid-refinement criteria of the flow domain: `(ratio, slope, curve, prune)`.
+See [`set_refine_criteria!`](@ref).
+"""
+function refine_criteria(flame::Flame1D)
+    c = get_array(4, (n, b) -> LibCantera.domain_getRefineCriteria(flame.flow.handle, n, b))
+    return (ratio=c[1], slope=c[2], curve=c[3], prune=c[4])
+end
+
+"Minimum grid spacing [m] allowed when refining the flow domain."
+function set_grid_min!(flame::Flame1D, dz::Real)
+    check(LibCantera.sim1D_setGridMin(flame.sim, Int32(1), Float64(dz)))
+    return flame
+end
+
+"""
+    set_max_jac_age!(flame, ss_age, ts_age) -> flame
+
+Number of steady-state (`ss_age`) and time-stepping (`ts_age`) Newton steps a
+Jacobian is reused for before it is recomputed.
+"""
+function set_max_jac_age!(flame::Flame1D, ss_age::Integer, ts_age::Integer)
+    check(LibCantera.sim1D_setMaxJacAge(flame.sim, Int32(ss_age), Int32(ts_age)))
+    return flame
+end
+
+"""
+    set_time_step!(flame, dt, nsteps) -> flame
+
+Initial time step `dt` [s] and the sequence `nsteps` of time steps taken
+between Newton attempts, when the solver falls back to time stepping.
+"""
+function set_time_step!(flame::Flame1D, dt::Real, nsteps::AbstractVector{<:Integer})
+    steps = Int32.(nsteps)
+    check(LibCantera.sim1D_setTimeStep(flame.sim, Float64(dt), Int32(length(steps)),
+                                       steps))
+    return flame
+end
+
+"Transport model used by the flow domain, e.g. `\"mixture-averaged\"`."
+transport_model(flame::Flame1D) =
+    get_string((n, b) -> LibCantera.flow_transportModel(flame.flow.handle, n, b))
+
+"Set the transport model of the flow domain, e.g. `\"multicomponent\"`."
+function set_transport_model!(flame::Flame1D, model::AbstractString)
+    check(LibCantera.domain_setTransportModel(flame.flow.handle, model))
+    return flame
+end
+
+"Include (or not) thermal diffusion (the Soret effect) in the species fluxes."
+function set_soret_enabled!(flame::Flame1D, flag::Bool=true)
+    check(LibCantera.flow_enableSoret(flame.flow.handle, Int32(flag)))
+    return flame
+end
+
+"Whether the energy equation is solved at every point of the flow domain."
+energy_enabled(flame::Flame1D) =
+    check(LibCantera.flow_allOfEnergyEnabled(flame.flow.handle)) != 0
+
+"""
+    set_energy_enabled!(flame, flag) -> flame
+
+Solve (or not) the energy equation.  With the energy equation disabled, the
+temperature follows the profile set by [`set_fixed_temp_profile!`](@ref), or
+otherwise stays at its current values.
+"""
+function set_energy_enabled!(flame::Flame1D, flag::Bool)
+    check(LibCantera.flow_setEnergyEnabled(flame.flow.handle, Int32(flag)))
+    return flame
+end
+
+"""
+    set_fixed_temp_profile!(flame, positions, T) -> flame
+
+Temperature profile imposed when the energy equation is disabled: values `T` [K]
+at `positions`, given as fractions (0 to 1) of the domain width.
+"""
+function set_fixed_temp_profile!(flame::Flame1D, positions, T)
+    z = as_f64(collect(positions))
+    t = as_f64(collect(T))
+    check(LibCantera.flow_setFixedTempProfile(flame.flow.handle, Int32(length(z)), z,
+                                              Int32(length(t)), t))
+    return flame
+end
+
+"""
+    save_solution(flame, filename; name="solution", description="", overwrite=false)
+
+Save the flame solution, including all domains, to `filename`.  The format
+follows the extension: YAML (`.yaml`) or, if Cantera was built with HDF5
+support, HDF5 (`.h5`).  `name` identifies the solution within the file.
+"""
+function save_solution(flame::Flame1D, filename::AbstractString;
+                       name::AbstractString="solution", description::AbstractString="",
+                       overwrite::Bool=false)
+    check(LibCantera.sim1D_save(flame.sim, filename, name, description, Int32(overwrite)))
+    return flame
+end
+
+"""
+    restore_solution!(flame, filename; name="solution") -> flame
+
+Restore a solution saved with [`save_solution`](@ref).  The flame should have been built
+for the same mechanism and inlet conditions.
+"""
+function restore_solution!(flame::Flame1D, filename::AbstractString;
+                           name::AbstractString="solution")
+    check(LibCantera.sim1D_restore(flame.sim, filename, name))
+    return flame
+end
+
+"Print the current solution of all domains to the Cantera log."
+show_solution(flame::Flame1D) = (check(LibCantera.sim1D_show(flame.sim)); nothing)
+
+"Print solver statistics (Jacobian evaluations, time steps, timing) to the Cantera log."
+write_stats(flame::Flame1D; print_time::Bool=true) =
+    (check(LibCantera.sim1D_writeStats(flame.sim, Int32(print_time))); nothing)
+
 export Domain1D, FreeFlame, BurnerFlame, set_burner!, burner_mdot,
        n_points, n_components, component_name,
        component_names, domain_type, grid, value, solution_profile, set_profile!,
        set_flat_profile!, setup_uniform_grid!, setup_grid!, set_refine_criteria!,
        solve!, flame_speed, flame_T, flame_X, flame_velocity,
-       set_fixed_temperature!, set_inlet!
+       set_fixed_temperature!, set_inlet!,
+       component_index, set_steady_tolerances!, set_transient_tolerances!,
+       set_bounds!, lower_bound, upper_bound, refine_criteria, set_grid_min!,
+       set_max_jac_age!, set_time_step!, set_transport_model!, set_soret_enabled!,
+       energy_enabled, set_fixed_temp_profile!, save_solution, restore_solution!,
+       show_solution, write_stats

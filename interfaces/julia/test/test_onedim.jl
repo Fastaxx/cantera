@@ -118,3 +118,69 @@ end
     @test occursin("closed", sprint(show, bf))
     CT.close!(gas)
 end
+
+@testset "OneDim / solver options and persistence" begin
+    # Low-pressure H2/O2 burner flame: small mechanism, quick to solve.
+    function burner()
+        gas = CT.Solution("h2o2.yaml")
+        CT.set_TPX!(gas, 373.0, 0.05 * CT.one_atm, "H2:1.5, O2:1, AR:7")
+        return CT.BurnerFlame(gas; width=0.5, mdot=0.06 * 0.0821)
+    end
+    bf = burner()
+    flow = bf.flow
+
+    @testset "refinement criteria" begin
+        CT.set_refine_criteria!(bf; ratio=3.0, slope=0.05, curve=0.1, prune=0.0)
+        @test CT.refine_criteria(bf) == (ratio=3.0, slope=0.05, curve=0.1, prune=0.0)
+    end
+
+    @testset "tolerances and bounds" begin
+        iT = CT.component_index(flow, "T")
+        @test CT.component_name(flow, iT) == "T"
+        CT.set_steady_tolerances!(flow; rtol=1e-5, atol=1e-10)
+        @test CT.rtol(flow, "T") == 1e-5
+        @test CT.atol(flow, "velocity") == 1e-10
+        CT.set_steady_tolerances!(flow; rtol=2e-5, atol=1e-11, component="T")
+        @test CT.rtol(flow, "T") == 2e-5
+        @test CT.rtol(flow, "velocity") == 1e-5           # other components unchanged
+        @test CT.set_transient_tolerances!(flow; rtol=1e-4, atol=1e-11) === flow
+        CT.set_bounds!(flow, "T"; lower=250.0, upper=6000.0)
+        @test CT.lower_bound(flow, "T") == 250.0
+        @test CT.upper_bound(flow, "T") == 6000.0
+    end
+
+    @testset "solver settings" begin
+        @test CT.set_grid_min!(bf, 1e-6) === bf
+        @test CT.set_max_jac_age!(bf, 10, 10) === bf
+        @test CT.set_time_step!(bf, 1e-5, [2, 5, 10, 20]) === bf
+        @test CT.transport_model(bf) == "mixture-averaged"
+    end
+
+    CT.solve!(bf; loglevel=0)
+    T = CT.flame_T(bf)
+    @test maximum(T) > 1000.0
+
+    @testset "save_solution / restore_solution!" begin
+        file = joinpath(mktempdir(), "burner.yaml")
+        @test CT.save_solution(bf, file; name="sol", description="test") === bf
+        @test_throws CT.CanteraError CT.save_solution(bf, file; name="sol")
+        CT.save_solution(bf, file; name="sol", overwrite=true)
+        restored = burner()
+        CT.restore_solution!(restored, file; name="sol")
+        @test CT.n_points(restored) == CT.n_points(bf)
+        @test CT.flame_T(restored) ≈ T rtol=1e-12
+        CT.close!(restored)
+    end
+
+    @testset "transport, Soret and energy options" begin
+        CT.set_transport_model!(bf, "multicomponent")
+        @test CT.transport_model(bf) == "multicomponent"
+        @test CT.set_soret_enabled!(bf, true) === bf
+        CT.set_energy_enabled!(bf, false)
+        @test !CT.energy_enabled(bf)
+        CT.set_fixed_temp_profile!(bf, [0.0, 0.5, 1.0], [373.0, 1200.0, 1200.0])
+        CT.set_energy_enabled!(bf, true)
+        @test CT.energy_enabled(bf)
+    end
+    CT.close!(bf)
+end
