@@ -158,15 +158,21 @@ function set_area!(r::Reactor, a)
 end
 
 """
-    ReactorSurface(surf, reactor; name="")
+    ReactorSurface(surf, reactor; clone=true, name="")
 
 A surface on which heterogeneous reactions take place, coupling the surface
-phase `surf` (a [`Solution`](@ref) for an interface phase) to a bulk `reactor`.
+phase `surf` (an [`Interface`](@ref)) to a bulk `reactor`.
+
+With `clone=true` (the default, as in Python), the surface works on its own copy
+of `surf`, attached to the reactor's copy of the bulk phase; read its state with
+`coverages(reactor_phase(rs))`.  With `clone=false`, `surf` is used directly and
+its adjacent bulk phase must then be the reactor's own phase.
 """
-function ReactorSurface(surf::Solution, reactor::Reactor; name::AbstractString="")
+function ReactorSurface(surf::Solution, reactor::Reactor; clone::Bool=true,
+                        name::AbstractString="")
     reactors = Int32[reactor.handle]
     h = check(LibCantera.reactor_newSurface(surf.handle, Int32(length(reactors)),
-                                            reactors, Int32(0), name))
+                                            reactors, Int32(clone), name))
     rs = Reactor(h, surf, false)
     finalizer(close!, rs)
     return rs

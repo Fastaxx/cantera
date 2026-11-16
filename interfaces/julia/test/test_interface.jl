@@ -83,3 +83,28 @@ end
     @test θ[species_index(surf, "O(S)")] > 0.5
     close!(surf)
 end
+
+@testset "ReactorSurface" begin
+    # Methane left after 0.5 s in a reactor, with or without a platinum surface.
+    function ch4_after(A)
+        g = Solution(SURF_MECH, "gas")
+        set_TPX!(g, 900.0, one_atm, LEAN)
+        r = IdealGasReactor(g)
+        rs = nothing
+        if A > 0
+            s = Interface(SURF_MECH, "Pt_surf"; adjacent=[g])
+            set_TP!(s, 900.0, one_atm)
+            rs = ReactorSurface(s, r)
+            set_area!(rs, A)
+            @test area(rs) ≈ A
+        end
+        advance!(ReactorNet([r]), 0.5)
+        ph = reactor_phase(r)
+        θ = rs === nothing ? nothing : coverages(reactor_phase(rs))
+        return mole_fractions(ph)[species_index(ph, "CH4")], θ
+    end
+    x_gas, _ = ch4_after(0.0)
+    x_surf, θ = ch4_after(1.0)
+    @test x_surf < x_gas            # the catalyst consumes methane
+    @test sum(θ) ≈ 1.0
+end
