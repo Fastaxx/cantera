@@ -2,7 +2,7 @@
 #
 # Builds libcantera *from this checkout* (so the generated CLib matches the
 # bindings, including functions this branch adds/renames), then runs the Julia
-# test suite against the freshly built library on Linux.
+# test suite against the freshly built library on Linux and on Windows (MSVC).
 name: Julia interface
 
 on:
@@ -86,4 +86,59 @@ jobs:
           CANTERA_DATA: ${{ github.workspace }}/data
         run: |
           julia --project=interfaces/julia -e 'using Pkg; Pkg.instantiate()'
+          julia --project=interfaces/julia interfaces/julia/test/runtests.jl
+
+  test-windows:
+    name: Julia ${{ matrix.julia-version }} on windows-2022 (MSVC)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash -el {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version: ['lts', '1']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up build dependencies (conda)
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
+        with:
+          miniforge-version: latest
+          activate-environment: build
+          python-version: '3.12'
+          channels: conda-forge
+
+      - name: Install Cantera build dependencies
+        run: |
+          conda install -y scons ruamel.yaml jinja2 doxygen boost-cpp eigen \
+            yaml-cpp highfive "fmt=12.0" openblas
+
+      - name: Build libcantera (shared)
+        # Run from PowerShell rather than Git Bash, whose `link` would shadow the
+        # MSVC linker.
+        shell: pwsh
+        run: |
+          scons build -j4 toolchain=msvc debug=n f90_interface=n python_package=n `
+            system_eigen=y system_yamlcpp=y system_highfive=y `
+            blas_lapack_libs=openblas
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
+        with:
+          version: ${{ matrix.julia-version }}
+
+      - name: Run tests
+        # CANTERA_LIBRARY_PATH is deliberately left unset, so that the tests also
+        # cover finding `cantera_shared.dll` in the build tree (gh-2192).
+        env:
+          CANTERA_DATA: ${{ github.workspace }}\data
+        run: |
+          julia --project=interfaces/julia -e 'using Pkg; Pkg.instantiate()'
+          julia --project=interfaces/julia -e \
+            'using Cantera; println("Loaded ", Cantera.LibCantera.libcantera)'
           julia --project=interfaces/julia interfaces/julia/test/runtests.jl
