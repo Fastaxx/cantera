@@ -87,3 +87,32 @@ jobs:
         run: |
           julia --project=interfaces/julia -e 'using Pkg; Pkg.instantiate()'
           julia --project=interfaces/julia interfaces/julia/test/runtests.jl
+
+      # The source distribution is what the Yggdrasil recipe for Cantera_jll builds:
+      # check that it builds with CMake alone and that the library passes the tests.
+      - name: Build the CLib source distribution with CMake
+        if: matrix.julia-version == '1'
+        run: |
+          conda install -y cmake
+          scons clib-sdist julia-package
+          mkdir -p build/clib_test
+          tar -xzf build/clib_sdist/cantera-clib-*.tar.gz -C build/clib_test
+          cmake -S build/clib_test/cantera-clib-* -B build/clib_test/build \
+            -DCMAKE_PREFIX_PATH="${CONDA_PREFIX}" \
+            -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/build/clib_test/install" \
+            -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON
+          cmake --build build/clib_test/build --parallel 2
+          cmake --install build/clib_test/build
+
+      - name: Run tests against the library from the source distribution
+        if: matrix.julia-version == '1'
+        env:
+          CANTERA_LIBRARY_PATH: ${{ github.workspace }}/build/clib_test/install/lib
+          CANTERA_DATA: ${{ github.workspace }}/build/clib_test/install/share/cantera/data
+        run: |
+          julia --project=interfaces/julia interfaces/julia/test/runtests.jl
+          # The assembled package depends on exactly this version of Cantera_jll.
+          julia -e 'using TOML
+            p = TOML.parsefile("build/julia/Project.toml")
+            @assert haskey(p["deps"], "Cantera_jll")
+            @assert p["compat"]["Cantera_jll"] == "=" * p["version"]'
