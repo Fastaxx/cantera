@@ -276,6 +276,38 @@ domain width when the temperature gradient at either edge is significant compare
 average gradient. This staging is what makes ignition cases converge from a cold start,
 and its absence is felt as solver failures rather than as wrong answers.
 
+(sec-julia-distribution)=
+## Distributing the Julia Package
+
+The Julia package is meant to be installed with `Pkg.add("Cantera")`, without building
+Cantera, much like the Python packages are installed from PyPI. This relies on three
+pieces:
+
+- `scons clib-sdist` creates `build/clib_sdist/cantera-clib-<version>.tar.gz`, a source
+  distribution of the shared library with its C API. Its CLib sources and Julia
+  bindings are already generated, so it builds with CMake alone, without SCons, Python
+  or Doxygen. The `Julia interface` CI workflow builds it with CMake and runs the test
+  suite against the result.
+- A recipe in [Yggdrasil](https://github.com/JuliaPackaging/Yggdrasil) builds this
+  archive into the `Cantera_jll` package for all supported platforms. Besides the
+  library, the artifact contains the generated bindings (`share/cantera/julia`) and the
+  data files (`share/cantera/data`).
+- `scons julia-package` assembles the registered package in `build/julia`: the Julia
+  sources and tests without `src/generated`, the license, and a `Project.toml` whose
+  version matches Cantera's and that requires exactly the same version of
+  `Cantera_jll`. Prerelease suffixes are dropped, since Julia package versions cannot
+  carry them.
+
+`LibCantera.jl` tells the two layouts apart by the presence of `src/generated`. In a
+source checkout, it uses the generated bindings and the library built from source; the
+registered package takes the library, the bindings and the data from `Cantera_jll`. In
+both cases, `CANTERA_LIBRARY_PATH` overrides the library.
+
+For a release, the archive is attached to the GitHub release and the Yggdrasil recipe is
+updated to build it. Once the new `Cantera_jll` is registered, the contents of
+`build/julia` are committed to the `Cantera.jl` repository, tagged, and registered in
+the General registry.
+
 ## Extending the Julia API
 
 Like all of Cantera, we welcome [contributions](CONTRIBUTING) to the Julia interface.
@@ -299,5 +331,5 @@ Adding a property to the interface usually means working from the bottom up:
 
 Because the low-level bindings are generated, a missing wrapper is far more often a
 missing CLib recipe than a missing Julia method. Running
-`sourcegen --api=julia --output=build/julia` and inspecting the generated file is the
-quickest way to confirm whether a function crosses the boundary at all.
+`sourcegen --api=julia --output=build/julia_bindings` and inspecting the generated file
+is the quickest way to confirm whether a function crosses the boundary at all.
