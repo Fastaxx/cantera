@@ -66,6 +66,8 @@ Additional command options:
 #
 # Other features not listed above:
 # 'scons sdist' - Build PyPI packages.
+# 'scons clib-sdist' - Build the CMake-based source distribution of the CLib.
+# 'scons julia-package' - Assemble the Julia package (Cantera.jl) in 'build/julia'.
 # 'scons <command> dump' - Dump the state of the SCons environment to the
 #                          screen instead of doing <command>, for example
 #                          'scons build dump'. For debugging purposes.
@@ -106,7 +108,7 @@ if os.name not in ["nt", "posix"]:
 
 valid_commands = ("build", "clean", "install", "uninstall",
                   "help", "msi", "samples", "sphinx", "doxygen", "dump",
-                  "sdist", "pyodide-wheel")
+                  "sdist", "pyodide-wheel", "clib-sdist", "julia-package")
 
 # set default logging level
 if GetOption("silent"):
@@ -2031,9 +2033,12 @@ if env['f90_interface'] == 'y':
 # CLib needs to come before src so generated code is available but we don't want
 # to run this for scons doxygen and scons sphinx
 if not {"doxygen", "sphinx"} & set(COMMAND_LINE_TARGETS):
-    SConscript("interfaces/clib/SConscript")
+    clib_sources = SConscript("interfaces/clib/SConscript")
     # The Julia bindings are scaffolded from the same CLib specifications
-    SConscript("interfaces/julia/SConscript")
+    julia_bindings = SConscript("interfaces/julia/SConscript")
+    # Source distribution of the CLib and the Julia package (Cantera.jl)
+    SConscript("interfaces/clib_sdist/SConscript",
+               exports={"clib_sources": clib_sources, "julia_bindings": julia_bindings})
 
 VariantDir('build/src', 'src', duplicate=0)
 SConscript('build/src/SConscript')

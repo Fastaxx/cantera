@@ -1,0 +1,37 @@
+"""SConscript file for the distribution of the CLib and the Julia package.
+
+`scons clib-sdist` creates the CMake-based source distribution of the shared library
+with its C API, and `scons julia-package` assembles the Julia package registered in
+the General registry. Both are built from generated files, hence the dependencies on
+the CLib and Julia bindings.
+"""
+
+Import("env", "clib_sources", "julia_bindings")
+
+root = Dir("#").abspath
+version = env["cantera_version"]
+
+sdist_dir = Dir(f"#build/clib_sdist/cantera-clib-{version}")
+clib_sdist = env.Command(
+    f"#build/clib_sdist/cantera-clib-{version}.tar.gz",
+    [clib_sources, julia_bindings],
+    f"$python_cmd interfaces/clib_sdist/build_sdist.py {root} {sdist_dir.abspath} "
+    f"{env['git_commit']} {version} {env['cantera_short_version']} --archive",
+    chdir=root,
+)
+# The archive copies most of the source tree, so always rebuild it on request.
+env.AlwaysBuild(clib_sdist)
+env.Alias("clib-sdist", clib_sdist)
+
+# Julia package versions cannot carry a prerelease suffix, so the package uses the
+# plain version number (4.0.0 for 4.0.0a2).
+package_dir = Dir("#build/julia")
+julia_package = env.Command(
+    "#build/julia/Project.toml",
+    [julia_bindings],
+    f"$python_cmd interfaces/julia/build_package.py {root} {package_dir.abspath} "
+    f"{env['cantera_pure_version']}",
+    chdir=root,
+)
+env.AlwaysBuild(julia_package)
+env.Alias("julia-package", julia_package)
